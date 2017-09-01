@@ -1,0 +1,621 @@
+Spark-Storm batch project
+
+1) Spark Core  - cloudera retail_db databases
+- datasets to be imported to hdfs and then transfer that to local file for github upload
+Operations :
+
+Steps :
+1) to get the dataset from cloudera quickstart VM 5.10
+To check the access and number of tables available in MYSQL db retail_db
+
+sqoop eval --connect jdbc:mysql://quickstart:3306/retail_db --username retail_dba --password cloudera --query "show tables"
+
+2) Imported all tables to HDFS 
+sqoop import-all-tables --connect jdbc:mysql://quickstart:3306/retail_db --username retail_dba --password cloudera --warehouse-dir retail_db_cloudera
+
+Operations:
+
+1) Count by orders status
+
+scala> val orders = sc.textFile("retail_db_cloudera/orders/")
+orders: org.apache.spark.rdd.RDD[String] = retail_db_cloudera/orders/ MapPartitionsRDD[3] at textFile at <console>:27
+
+scala> orders.take(5)
+res1: Array[String] = Array(1,2013-07-25 00:00:00.0,11599,CLOSED, 2,2013-07-25 00:00:00.0,256,PENDING_PAYMENT, 3,2013-07-25 00:00:00.0,12111,COMPLETE, 4,2013-07-25 00:00:00.0,8827,CLOSED, 5,2013-07-25 00:00:00.0,11318,COMPLETE)
+
+scala> orders.take(5).foreach(println)
+1,2013-07-25 00:00:00.0,11599,CLOSED
+2,2013-07-25 00:00:00.0,256,PENDING_PAYMENT
+3,2013-07-25 00:00:00.0,12111,COMPLETE
+4,2013-07-25 00:00:00.0,8827,CLOSED
+5,2013-07-25 00:00:00.0,11318,COMPLETE
+
+scala> val orders = sc.textFile("retail_db_cloudera/orders/").map(rec => (rec.split(",")(3),1))
+orders: org.apache.spark.rdd.RDD[(String, Int)] = MapPartitionsRDD[6] at map at <console>:27
+
+scala> orders.take(5).foreach(println)
+(CLOSED,1)
+(PENDING_PAYMENT,1)
+(COMPLETE,1)
+(CLOSED,1)
+(COMPLETE,1)
+
+scala> val ordersByStatus = orders.reduceByKey(_+_)
+ordersByStatus: org.apache.spark.rdd.RDD[(String, Int)] = ShuffledRDD[7] at reduceByKey at <console>:29
+
+scala> ordersByStatus.collect().foreach(println)
+(CLOSED,7556)
+(CANCELED,1428)
+(PAYMENT_REVIEW,729)
+(COMPLETE,22899)
+(PENDING_PAYMENT,15030)
+(PENDING,7610)
+(ON_HOLD,3798)
+(PROCESSING,8275)
+(SUSPECTED_FRAUD,1558)
+
+// this saves output in 4 partitioned files.
+scala> ordersByStatus.saveAsTextFile("Orders_By_Status/result.txt")
+                                                                                
+//this saves output in 1 file
+scala> ordersByStatus.repartition(1).saveAsTextFile("Orders_By_Status/result.txt")
+
+scala> ordersByStatus.map(rec => (rec._1 + "," + rec._2)).collect().foreach(println)
+CLOSED,7556
+CANCELED,1428
+PAYMENT_REVIEW,729
+COMPLETE,22899
+PENDING_PAYMENT,15030
+PENDING,7610
+ON_HOLD,3798
+PROCESSING,8275
+SUSPECTED_FRAUD,1558
+
+scala> ordersByStatus.map(rec => (rec._1 + "," + rec._2)).collect()
+res27: Array[String] = Array(CLOSED,7556, CANCELED,1428, PAYMENT_REVIEW,729, COMPLETE,22899, PENDING_PAYMENT,15030, PENDING,7610, ON_HOLD,3798, PROCESSING,8275, SUSPECTED_FRAUD,1558)
+
+scala> ordersByStatus.count
+res28: Long = 9
+
+
+scala> ordersByStatus.map(rec => rec.productIterator.mkString(",")).collect().foreach(println)
+CLOSED,7556
+CANCELED,1428
+PAYMENT_REVIEW,729
+COMPLETE,22899
+PENDING_PAYMENT,15030
+PENDING,7610
+ON_HOLD,3798
+PROCESSING,8275
+SUSPECTED_FRAUD,1558
+
+scala> ordersByStatus.map(rec => rec.productIterator.mkString(",")).collect()
+res46: Array[String] = Array(CLOSED,7556, CANCELED,1428, PAYMENT_REVIEW,729, COMPLETE,22899, PENDING_PAYMENT,15030, PENDING,7610, ON_HOLD,3798, PROCESSING,8275, SUSPECTED_FRAUD,1558)
+
+scala> ordersByStatus.map(rec => rec.productIterator.mkString(",")).repartition(1).saveAsTextFile("Orders_By_Status/result1")
+
+
+scala> orders.countByKey().foreach(println)
+(PAYMENT_REVIEW,729)
+(CLOSED,7556)
+(SUSPECTED_FRAUD,1558)
+(PROCESSING,8275)
+(COMPLETE,22899)
+(PENDING,7610)
+(PENDING_PAYMENT,15030)
+(ON_HOLD,3798)
+(CANCELED,1428)
+
+scala> orders.countByKey().map(rec => rec._1 + "," + rec._2).foreach(println)
+PAYMENT_REVIEW,729
+CLOSED,7556
+SUSPECTED_FRAUD,1558
+PROCESSING,8275
+COMPLETE,22899
+PENDING,7610
+PENDING_PAYMENT,15030
+ON_HOLD,3798
+CANCELED,1428
+
+2) Compute daily revenue
+
+scala> val orders = sc.textFile("retail_db_cloudera/orders/").filter(rec => rec.split(",")(3) == "COMPLETE" | rec.split(",")(3) == "CLOSED")
+orders: org.apache.spark.rdd.RDD[String] = MapPartitionsRDD[13] at filter at <console>:27
+
+scala> orders.take(5).foreach(println)
+1,2013-07-25 00:00:00.0,11599,CLOSED
+3,2013-07-25 00:00:00.0,12111,COMPLETE
+4,2013-07-25 00:00:00.0,8827,CLOSED
+5,2013-07-25 00:00:00.0,11318,COMPLETE
+6,2013-07-25 00:00:00.0,7130,COMPLETE
+
+scala> val orders_rec = orders.map(rec => (rec.split(",")(0).toInt,rec.split(",")(1)))
+orders_rec: org.apache.spark.rdd.RDD[(Int, String)] = MapPartitionsRDD[25] at map at <console>:29
+
+scala> orders_rec.take(5).foreach(println)
+(1,2013-07-25 00:00:00.0)
+(3,2013-07-25 00:00:00.0)
+(4,2013-07-25 00:00:00.0)
+(5,2013-07-25 00:00:00.0)
+(6,2013-07-25 00:00:00.0)
+
+
+scala> val order_items = sc.textFile("retail_db_cloudera/order_items/")
+order_items: org.apache.spark.rdd.RDD[String] = retail_db_cloudera/order_items/ MapPartitionsRDD[20] at textFile at <console>:27
+
+scala> order_items.take(5).foreach(println)
+1,1,957,1,299.98,299.98
+2,2,1073,1,199.99,199.99
+3,2,502,5,250.0,50.0
+4,2,403,1,129.99,129.99
+5,4,897,2,49.98,24.99
+
+
+scala> val order_items_rec = order_items.map(rec => (rec.split(",")(1).toInt,rec.split(",")(4).toDouble))
+order_items_rec: org.apache.spark.rdd.RDD[(Int, Double)] = MapPartitionsRDD[30] at map at <console>:29
+
+scala> order_items_rec.take(5).foreach(println)
+(1,299.98)
+(2,199.99)
+(2,250.0)
+(2,129.99)
+(4,49.98)
+
+scala> val joined_rec = orders_rec.join(order_items_rec)
+joined_rec: org.apache.spark.rdd.RDD[(Int, (String, Double))] = MapPartitionsRDD[33] at join at <console>:35
+
+scala> joined_rec.take(5).foreach(println)
+(18624,(2013-11-17 00:00:00.0,199.99))                                          
+(18500,(2013-11-16 00:00:00.0,50.0))
+(18500,(2013-11-16 00:00:00.0,399.98))
+(23776,(2013-12-20 00:00:00.0,199.99))
+(23776,(2013-12-20 00:00:00.0,129.99))
+
+scala> val joined_map = joined_rec.map(rec => rec._2)
+joined_map: org.apache.spark.rdd.RDD[(String, Double)] = MapPartitionsRDD[53] at map at <console>:37
+
+scala> joined_map.take(10).foreach(println)
+(2013-11-17 00:00:00.0,199.99)
+(2013-11-16 00:00:00.0,50.0)
+(2013-11-16 00:00:00.0,399.98)
+(2013-12-20 00:00:00.0,199.99)
+(2013-12-20 00:00:00.0,129.99)
+(2014-06-13 00:00:00.0,399.98)
+(2014-06-13 00:00:00.0,199.95)
+(2014-06-13 00:00:00.0,99.96)
+(2014-06-13 00:00:00.0,200.0)
+(2014-06-13 00:00:00.0,99.96)
+
+scala> val daily_revenue = joined_map.reduceByKey(_+_).sortByKey()
+daily_revenue: org.apache.spark.rdd.RDD[(String, Double)] = ShuffledRDD[57] at sortByKey at <console>:39
+
+scala> daily_revenue.take(5).foreach(println)
+(2013-07-25 00:00:00.0,31547.229999999985)
+(2013-07-26 00:00:00.0,54713.22999999997)
+(2013-07-27 00:00:00.0,48411.479999999974)
+(2013-07-28 00:00:00.0,35672.029999999984)
+(2013-07-29 00:00:00.0,54579.69999999997)
+
+scala> daily_revenue.repartition(1).saveAsTextFile("Daily_Revenue/results")
+
+//same results as above just using aggregateByKey
+
+scala> val daily_revenue_ABK = joined_map.aggregateByKey(0.0)((intAgg,intVal) => intAgg + intVal,(finAgg,finVal) => finAgg + finVal).sortByKey()
+daily_revenue_ABK: org.apache.spark.rdd.RDD[(String, Double)] = ShuffledRDD[66] at sortByKey at <console>:39
+
+scala> daily_revenue_ABK.take(5).foreach(println)
+(2013-07-25 00:00:00.0,31547.229999999985)
+(2013-07-26 00:00:00.0,54713.22999999997)
+(2013-07-27 00:00:00.0,48411.479999999974)
+(2013-07-28 00:00:00.0,35672.029999999984)
+(2013-07-29 00:00:00.0,54579.69999999997)
+
+// number of order items per day
+
+scala> val joined_map_orders = joined_rec.map(rec => rec._2).map(rec => (rec._1,(rec._2,1)))
+joined_map: org.apache.spark.rdd.RDD[(String, (Double, Int))] = MapPartitionsRDD[12] at map at <console>:37
+
+scala> joined_map.take(10).foreach(println)
+(2013-11-17 00:00:00.0,(199.99,1))
+(2013-11-16 00:00:00.0,(50.0,1))
+(2013-11-16 00:00:00.0,(399.98,1))
+(2013-12-20 00:00:00.0,(199.99,1))
+(2013-12-20 00:00:00.0,(129.99,1))
+(2014-06-13 00:00:00.0,(399.98,1))
+(2014-06-13 00:00:00.0,(199.95,1))
+(2014-06-13 00:00:00.0,(99.96,1))
+(2014-06-13 00:00:00.0,(200.0,1))
+(2014-06-13 00:00:00.0,(99.96,1))
+
+scala> val dailyRevenueAndNoOfOrders = joined_map_orders.reduceByKey((agg,value) => (agg._1 + value._1,agg._2 + value._2)).sortByKey()
+dailyRevenueAndNoOfOrders: org.apache.spark.rdd.RDD[(String, (Double, Int))] = ShuffledRDD[16] at sortByKey at <console>:39
+
+// daily revenue and number of orders
+
+scala> dailyRevenueAndNoOfOrders.take(5).foreach(println)
+(2013-07-25 00:00:00.0,(31547.229999999985,150))
+(2013-07-26 00:00:00.0,(54713.22999999997,285))
+(2013-07-27 00:00:00.0,(48411.479999999974,239))
+(2013-07-28 00:00:00.0,(35672.029999999984,181))
+(2013-07-29 00:00:00.0,(54579.69999999997,274))
+
+scala> dailyRevenueAndNoOfOrders.saveAsTextFile("DailyReveneuAndOrders/result")
+[Stage 25:=============================>                            (2 + 1) / 4]17/08/18 17:38:53 WARN hdfs.DFSClient: Caught exception 
+java.lang.InterruptedException
+	at java.lang.Object.wait(Native Method)
+	at java.lang.Thread.join(Thread.java:1281)
+	at java.lang.Thread.join(Thread.java:1355)
+	at org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.closeResponder(DFSOutputStream.java:951)
+	at org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.endBlock(DFSOutputStream.java:689)
+	at org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.run(DFSOutputStream.java:878)
+
+
+
+3) Daily revenue per day per department
+
+scala> val order_items = sc.textFile("retail_db_cloudera/order_items/")
+order_items: org.apache.spark.rdd.RDD[String] = retail_db_cloudera/order_items/ MapPartitionsRDD[68] at textFile at <console>:27
+
+scala> val order_items_rec = order_items.map(rec => (rec.split(",")(1).toInt,(rec.split(",")(2).toInt,rec.split(",")(4).toDouble)))
+order_items_rec: org.apache.spark.rdd.RDD[(Int, (Int, Double))] = MapPartitionsRDD[74] at map at <console>:29
+
+// order_id, product id, subtotal
+
+scala> order_items_rec.take(5).foreach(println)
+(1,(957,299.98))
+(2,(1073,199.99))
+(2,(502,250.0))
+(2,(403,129.99))
+(4,(897,49.98))
+
+
+scala> val orders = sc.textFile("retail_db_cloudera/orders/").filter(rec => rec.split(",")(3) == "COMPLETE" | rec.split(",")(3) == "CLOSED")
+orders: org.apache.spark.rdd.RDD[String] = MapPartitionsRDD[72] at filter at <console>:27
+
+scala> val orders_rec = orders.map(rec => (rec.split(",")(0).toInt,rec.split(",")(1)))
+orders_rec: org.apache.spark.rdd.RDD[(Int, String)] = MapPartitionsRDD[73] at map at <console>:29
+
+// order_id, date
+
+scala> orders_rec.take(5).foreach(println)
+(1,2013-07-25 00:00:00.0)
+(3,2013-07-25 00:00:00.0)
+(4,2013-07-25 00:00:00.0)
+(5,2013-07-25 00:00:00.0)
+(6,2013-07-25 00:00:00.0)
+
+scala> val join_order_orderItems = orders_rec.join(order_items_rec)
+join_order_orderItems: org.apache.spark.rdd.RDD[(Int, (String, (Int, Double)))] = MapPartitionsRDD[79] at join at <console>:35
+
+// order_id , date, product_id, subtotal
+
+scala> join_order_orderItems.take(5).foreach(println)
+(18624,(2013-11-17 00:00:00.0,(1073,199.99)))                                   
+(18500,(2013-11-16 00:00:00.0,(502,50.0)))
+(18500,(2013-11-16 00:00:00.0,(1004,399.98)))
+(23776,(2013-12-20 00:00:00.0,(1073,199.99)))
+(23776,(2013-12-20 00:00:00.0,(403,129.99)))
+
+scala> val byProductId = join_order_orderItems.map(rec => (rec._2._2._1,(rec._2._1,rec._2._2._2)))
+byProductId: org.apache.spark.rdd.RDD[(Int, (String, Double))] = MapPartitionsRDD[80] at map at <console>:37
+
+//product_id, date, subtotal
+
+scala> byProductId.take(5).foreach(println)
+(1073,(2013-11-17 00:00:00.0,199.99))
+(502,(2013-11-16 00:00:00.0,50.0))
+(1004,(2013-11-16 00:00:00.0,399.98))
+(1073,(2013-12-20 00:00:00.0,199.99))
+(403,(2013-12-20 00:00:00.0,129.99))
+
+scala>val departments = sc.textFile("retail_db_cloudera/departments/")
+
+scala> val dept_rec = departments.map(rec => (rec.split(",")(0),rec.split(",")(1)))
+dept_rec: org.apache.spark.rdd.RDD[(String, String)] = MapPartitionsRDD[12] at map at <console>:29
+
+// dept_id, dept_name
+
+scala> dept_rec.take(5).foreach(println)
+(2,Fitness)
+(3,Footwear)
+(4,Apparel)
+(5,Golf)
+(6,Outdoors)
+
+scala> val categories = sc.textFile("retail_db_cloudera/categories/")
+categories: org.apache.spark.rdd.RDD[String] = retail_db_cloudera/categories/ MapPartitionsRDD[14] at textFile at <console>:27
+
+scala> val category_rec = categories.map(rec => (rec.split(",")(1),rec.split(",")(0)))
+category_rec: org.apache.spark.rdd.RDD[(String, String)] = MapPartitionsRDD[15] at map at <console>:29
+
+// dept_id, category_id
+
+scala> category_rec.take(5).foreach(println)
+(2,1)
+(2,2)
+(2,3)
+(2,4)
+(2,5)
+
+//join on dept_id
+
+scala> val join_dept_categ = dept_rec.join(category_rec)
+join_dept_categ: org.apache.spark.rdd.RDD[(String, (String, String))] = MapPartitionsRDD[18] at join at <console>:35
+
+// dept_id, dept_name,category_id
+
+scala> join_dept_categ.take(5).foreach(println)
+(4,(Apparel,17))
+(4,(Apparel,18))
+(4,(Apparel,19))
+(4,(Apparel,20))
+(4,(Apparel,21))
+
+scala> val dept_categ_swap = join_dept_categ.map(rec => rec._2).map(rec => rec.swap)
+dept_categ_swap: org.apache.spark.rdd.RDD[(String, String)] = MapPartitionsRDD[20] at map at <console>:37
+
+//category_id, dept_name
+
+scala> dept_categ_swap.take(5).foreach(println)
+(17,Apparel)
+(18,Apparel)
+(19,Apparel)
+(20,Apparel)
+(21,Apparel)
+
+scala> val products = sc.textFile("retail_db_cloudera/products/")
+products: org.apache.spark.rdd.RDD[String] = retail_db_cloudera/products/ MapPartitionsRDD[22] at textFile at <console>:27
+
+scala> val products_rec = products.map(rec => (rec.split(",")(1),rec.split(",")(0)))
+products_rec: org.apache.spark.rdd.RDD[(String, String)] = MapPartitionsRDD[23] at map at <console>:29
+
+//category_id, product_id
+
+scala> products_rec.take(5).foreach(println)
+(2,1)
+(2,2)
+(2,3)
+(2,4)
+(2,5)
+
+// join on category_id
+
+scala> val join_categ_dept_prod = dept_categ_swap.join(products_rec)
+join_categ_dept_prod: org.apache.spark.rdd.RDD[(String, (String, String))] = MapPartitionsRDD[26] at join at <console>:43
+
+// category_id, dept_name, dept_id
+
+scala> join_categ_dept_prod.take(5).foreach(println)
+(4,(Fitness,49))
+(4,(Fitness,50))
+(4,(Fitness,51))
+(4,(Fitness,52))
+(4,(Fitness,53))
+
+scala> scala> val dept_prod_swap = join_categ_dept_prod.map(rec => rec._2).map(rec => rec.swap).map(rec=>(rec._1.toInt,rec._2))
+dept_prod_swap: org.apache.spark.rdd.RDD[(String, String)] = MapPartitionsRDD[28] at map at <console>:45
+
+//product_id,dept_name
+
+scala> dept_prod_swap.take(5).foreach(println)
+(49,Fitness)
+(50,Fitness)
+(51,Fitness)
+(52,Fitness)
+(53,Fitness)
+
+//join by product_id
+
+scala> val join_date_dept_subtotal = dept_prod_swap.join(byProductId)
+join_date_dept_subtotal: org.apache.spark.rdd.RDD[(Int, (String, (String, Double)))] = MapPartitionsRDD[41] at join at <console>:59
+
+// product_id, dept_name, date, subtotal
+
+scala> join_date_dept_subtotal.take(5).foreach(println)
+(860,(Outdoors,(2014-01-25 00:00:00.0,599.99)))                                 
+(860,(Outdoors,(2013-12-23 00:00:00.0,599.99)))
+(860,(Outdoors,(2014-03-17 00:00:00.0,599.99)))
+(24,(Fitness,(2014-04-15 00:00:00.0,159.98)))
+(24,(Fitness,(2014-04-01 00:00:00.0,159.98)))
+
+scala> val flattenRec = join_date_dept_subtotal.map(rec => rec._2).map(rec => ((rec._2._1,rec._1),rec._2._2))
+flattenRec: org.apache.spark.rdd.RDD[((String, String), Double)] = MapPartitionsRDD[56] at map at <console>:61
+
+// date,dept_name,subtotal
+
+scala> flattenRec.take(5).foreach(println)
+((2014-01-25 00:00:00.0,Outdoors),599.99)
+((2013-12-23 00:00:00.0,Outdoors),599.99)
+((2014-03-17 00:00:00.0,Outdoors),599.99)
+((2014-04-15 00:00:00.0,Fitness),159.98)
+((2014-04-01 00:00:00.0,Fitness),159.98)
+
+
+scala> val perDeptperDay = flattenRec.reduceByKey(_+_).sortByKey()
+perDeptperDay: org.apache.spark.rdd.RDD[((String, String), Double)] = ShuffledRDD[61] at sortByKey at <console>:63
+
+// date, dept_name, revenue
+
+scala> perDeptperDay.take(10).foreach(println)
+((2013-07-25 00:00:00.0,Apparel),5309.29)
+((2013-07-25 00:00:00.0,Fan Shop),15898.149999999996)
+((2013-07-25 00:00:00.0,Fitness),494.92999999999995)
+((2013-07-25 00:00:00.0,Footwear),5699.479999999998)
+((2013-07-25 00:00:00.0,Golf),3049.69)
+((2013-07-25 00:00:00.0,Outdoors),1095.69)
+((2013-07-26 00:00:00.0,Apparel),11228.419999999995)
+((2013-07-26 00:00:00.0,Fan Shop),26646.86999999998)
+((2013-07-26 00:00:00.0,Fitness),344.97)
+((2013-07-26 00:00:00.0,Footwear),7259.209999999999)
+
+scala> perDeptperDay.saveAsTextFile("RevenuePerDayPerDept/result")
+[Stage 157:============================>                            (2 + 1) / 4]17/08/18 05:11:25 WARN hdfs.DFSClient: Caught exception 
+java.lang.InterruptedException
+	at java.lang.Object.wait(Native Method)
+	at java.lang.Thread.join(Thread.java:1281)
+	at java.lang.Thread.join(Thread.java:1355)
+	at org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.closeResponder(DFSOutputStream.java:951)
+	at org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.endBlock(DFSOutputStream.java:689)
+	at org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.run(DFSOutputStream.java:878)
+                                                                                
+scala> 
+
+4) Find the most expensive product
+
+scala> val products = sc.textFile("retail_db_cloudera/products/")
+products: org.apache.spark.rdd.RDD[String] = retail_db_cloudera/products/ MapPartitionsRDD[54] at textFile at <console>:27
+
+scala> val productsFiltered = products.filter(rec => rec.split(",")(0).toInt != 685)
+productsFiltered: org.apache.spark.rdd.RDD[String] = MapPartitionsRDD[55] at filter at <console>:29
+
+scala> productsFiltered.count
+res22: Long = 1344
+
+scala> products.count
+res23: Long = 1345
+
+scala> val products_rec = productsFiltered.map(rec => (rec.split(",")(4).toDouble,rec.split(",")(2)))
+products_rec: org.apache.spark.rdd.RDD[(Double, String)] = MapPartitionsRDD[57] at map at <console>:31
+
+// product price, product_name
+
+scala> products_rec.take(5).foreach(println)
+(59.98,Quest Q64 10 FT. x 10 FT. Slant Leg Instant U)
+(129.99,Under Armour Men's Highlight MC Football Clea)
+(89.99,Under Armour Men's Renegade D Mid Football Cl)
+(89.99,Under Armour Men's Renegade D Mid Football Cl)
+(199.99,Riddell Youth Revolution Speed Custom Footbal)
+
+scala> products_rec.sortByKey(false).take(5).foreach(println)
+(1999.99,SOLE E35 Elliptical)
+(1799.99,SOLE F85 Treadmill)
+(1799.99,SOLE F85 Treadmill)
+(1799.99,SOLE F85 Treadmill)
+(1099.99,Spalding Beast 60" Glass Portable Basketball )
+
+scala> products_rec.sortByKey(false).saveAsTextFile("Top5ExpensiveProducts/result")
+17/08/18 18:46:10 WARN hdfs.DFSClient: Caught exception 
+java.lang.InterruptedException
+	at java.lang.Object.wait(Native Method)
+	at java.lang.Thread.join(Thread.java:1281)
+	at java.lang.Thread.join(Thread.java:1355)
+	at org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.closeResponder(DFSOutputStream.java:951)
+	at org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.endBlock(DFSOutputStream.java:689)
+	at org.apache.hadoop.hdfs.DFSOutputStream$DataStreamer.run(DFSOutputStream.java:878)
+
+
+5) Top 5 expensive products in each category
+
+scala> val categories = sc.textFile("retail_db_cloudera/categories/")
+categories: org.apache.spark.rdd.RDD[String] = retail_db_cloudera/categories/ MapPartitionsRDD[104] at textFile at <console>:27
+
+scala> //categoryid categoryname
+
+scala> val categories_rec = categories.map(rec => (rec.split(",")(0).toInt,rec.split(",")(2))) 
+categories_rec: org.apache.spark.rdd.RDD[(Int, String)] = MapPartitionsRDD[105] at map at <console>:29
+
+scala> categories_rec.take(5).foreach(println)
+(1,Football)
+(2,Soccer)
+(3,Baseball & Softball)
+(4,Basketball)
+(5,Lacrosse)
+
+scala> val products = sc.textFile("retail_db_cloudera/products/")
+products: org.apache.spark.rdd.RDD[String] = retail_db_cloudera/products/ MapPartitionsRDD[107] at textFile at <console>:27
+
+scala> val productsFiltered = products.filter(rec => rec.split(",")(0).toInt != 685)
+productsFiltered: org.apache.spark.rdd.RDD[String] = MapPartitionsRDD[108] at filter at <console>:29
+
+scala> // categoryid,product_name,product_price
+
+scala> val products_rec = productsFiltered.map(rec => (rec.split(",")(1).toInt,(rec.split(",")(2),rec.split(",")(4).toDouble))) 
+products_rec: org.apache.spark.rdd.RDD[(Int, (String, Double))] = MapPartitionsRDD[109] at map at <console>:31
+
+scala> products_rec.take(5).foreach(println)
+(2,(Quest Q64 10 FT. x 10 FT. Slant Leg Instant U,59.98))
+(2,(Under Armour Men's Highlight MC Football Clea,129.99))
+(2,(Under Armour Men's Renegade D Mid Football Cl,89.99))
+(2,(Under Armour Men's Renegade D Mid Football Cl,89.99))
+(2,(Riddell Youth Revolution Speed Custom Footbal,199.99))
+
+scala> val join_catg_prod = categories_rec.join(products_rec)
+join_catg_prod: org.apache.spark.rdd.RDD[(Int, (String, (String, Double)))] = MapPartitionsRDD[112] at join at <console>:37
+
+scala> join_catg_prod.take(5).foreach(println)
+(52,(NBA,(Reebok Men's Chicago Blackhawks Patrick Kane ,170.0)))
+(52,(NBA,($10 Gift Card,10.0)))
+(52,(NBA,(Reebok Men's Boston Bruins Patrice Bergeron #,170.0)))
+(52,(NBA,(Reebok Men's Chicago Blackhawks Jonathan Toew,170.0)))
+(52,(NBA,(Reebok Men's Chicago Blackhawks Jonathan Toew,170.0)))
+
+scala> val catg_prod = join_catg_prod.map(rec => (rec._2._1,(rec._2._2._1 + "," + rec._2._2._2)))
+catg_prod: org.apache.spark.rdd.RDD[(String, String)] = MapPartitionsRDD[113] at map at <console>:39
+
+scala> catg_prod.take(5).foreach(println)
+(NBA,Reebok Men's Chicago Blackhawks Patrick Kane ,170.0)
+(NBA,$10 Gift Card,10.0)
+(NBA,Reebok Men's Boston Bruins Patrice Bergeron #,170.0)
+(NBA,Reebok Men's Chicago Blackhawks Jonathan Toew,170.0)
+(NBA,Reebok Men's Chicago Blackhawks Jonathan Toew,170.0)
+
+scala> val cate_groupBy = catg_prod.groupByKey()
+cate_groupBy: org.apache.spark.rdd.RDD[(String, Iterable[String])] = ShuffledRDD[114] at groupByKey at <console>:41
+
+scala> cate_groupBy.take(5).foreach(println)
+(Cleats,CompactBuffer(Bowflex Uppercut,129.99, Perfect Fitness Perfect Ab Strap Pro,29.99, Total Gym 1100,199.99, Total Gym 1400,299.99, Perfect Fitness Perfect Rip Deck,59.99, Gazelle Supreme Glider,299.99, Gazelle Edge Pro Glider,149.99, Pink BOSU Balance Trainer,119.99, BOSU Ballast Ball,59.99, Kettleglove Unisex Kettleball Gloves,19.99, Total Gym 1900,399.99, Perfect Ab Carver Pro,39.99, Perfect Fitness Multi Gym Pro,39.99, Perfect Pushup BASIC,19.99, Gold's Gym K10 7-in-1 Body Building Kit,49.99, Perfect Pushup V2 Performance,29.99, Perfect Pullup Basic,19.99, AB Roller Evolution,29.99, Perfect Multi-Gym - As Seen on TV!,29.99, BOSU Balance Trainer,119.99))
+(Accessories,CompactBuffer(Team Golf St. Louis Cardinals Putter Grip,24.99, Team Golf San Francisco Giants Putter Grip,24.99, Team Golf New York Yankees Putter Grip,24.99, Team Golf Detroit Tigers Putter Grip,24.99, Team Golf Chicago Cubs Putter Grip,24.99, Team Golf Boston Red Sox Putter Grip,24.99, Team Golf Washington Redskins Putter Grip,24.99, Team Golf San Francisco 49ers Putter Grip,24.99, Team Golf Pittsburgh Steelers Putter Grip,24.99, Team Golf Dallas Cowboys Putter Grip,24.99, Team Golf Oakland Raiders Putter Grip,24.99, Team Golf New York Giants Putter Grip,24.99, Team Golf New England Patriots Putter Grip,24.99, Team Golf Minnesota Vikings Putter Grip,24.99, Team Golf Green Bay Packers Putter Grip,24.99, Team Golf Chicago Bears Putter Grip,24.99, Team Golf Baltimore Ravens Putter Grip,24.99, Team Golf West Virginia Mountaineers Putter G,24.99, Team Golf Missouri Tigers Putter Grip,24.99, Team Golf Wisconsin Badgers Putter Grip,24.99, Team Golf Texas Longhorns Putter Grip,24.99, Team Golf Tennessee Volunteers Putter Grip,24.99, Team Golf South Carolina Gamecocks Putter Gri,24.99, Team Golf Penn State Nittany Lions Putter Gri,24.99, Nike Women's Tempo Shorts,30.0, Nike Women's Tempo Shorts,30.0, Brooks Women's Adrenaline GTS 13 Running Shoe,89.99, Nike+ Fuelband SE,99.0, Top Flite Women's XL 12-Piece Complete Set - ,179.98, Fitbit Flex Wireless Activity & Sleep Wristba,99.95, Nike Women's Tempo Shorts,30.0, Nike Men's Free 5.0+ Running Shoe,99.99, Nike Women's Pro Core 3" Compression Shorts,28.0, Coleman River Gorge 6 Person Dome Tent,79.98, Jordan Men's VI Retro TD Football Cleat,134.99, SOLE E25 Elliptical,999.99, Nike Kids' Grade School KD VI Basketball Shoe,99.99, Nike Women's Free 4.0 Running Shoe,89.99, Under Armour Women's Micro G Skulpt Running S,54.97, Nike Men's Free 5.0 Running Shoe,99.99, Brooks Women's Ghost 6 Running Shoe,89.99, Nike Women's Pro Victory Compression Bra,21.99, Slazenger Women's Ava Sleeveless Fashion Golf,32.0, SOLE F85 Treadmill,1799.99, Nike Women's Free 5.0+ Running Shoe,99.99, Brooks Men's Adrenaline GTS 13 Running Shoe,89.99, Brooks Women's Ghost 6 Running Shoe,89.99, Kijaro Dual Lock Chair,29.99, Lotto Men's Zhero Gravity V 700 TF Soccer Cle,59.99, adidas Men's 2014 All-Star Game Tactile Hunte,20.0, Lotto Men's Zhero Gravity V 700 TF Soccer Cle,59.99, Lotto Men's Zhero Gravity V 700 TF Soccer Cle,59.99, adidas Men's 2014 MLS All-Star Game Dueling T,24.0, adidas Men's 2014 MLS All-Star Game Cross Bla,20.0, adidas Original Men's 2014 MLS All-Star Game ,28.0, adidas Original Men's 2014 MLS All-Star Game ,28.0, adidas Men's 2014 MLS All-Star Game Rose City,28.0, adidas Men's 2014 MLS All-Star Game Crest Gre,28.0, adidas Women's 2014 MLS All-Star Game Dueling,28.0, adidas Men's 2014 MLS All-Star Game Replica B,85.0, adidas Men's 2014 MLS All-Star Game Lumber Hu,22.0, adidas Men's 2014 MLS All-Star Game Axis Hunt,22.0, adidas Men's Germany 2014 FIFA World Cup Braz,22.0, Nike Men's Deutschland Weltmeister Winners Bl,30.0, adidas Youth Germany Black/Red Away Match Soc,70.0, adidas Men's Germany Black/Red Away Match Soc,90.0, adidas Men's Germany Black Crest Away Tee,25.0, adidas Youth Germany Black Crest Tee,18.0, adidas Men's Germany Home Soccer Jersey,90.0, adidas Men's Germany Home Replica White Top,50.0, TYR Girls' Phoenix Maxfit Back Swimsuit,75.99, TYR Girls' Palisade Maxfit Back Swimsuit,75.99))
+(Cardio Equipment,CompactBuffer(Diamondback Adult Sorrento Mountain Bike 2014,299.98, Quest Q64 10 FT. x 10 FT. Slant Leg Instant U,59.98, MAC Sports Collapsible Wagon,69.99, Nike Women's Tempo Shorts,30.0, Under Armour Men's Highlight MC Football Clea,129.99, Nike Men's USA White Home Stadium Soccer Jers,90.0, Nike Women's Tempo Shorts,30.0, Easton Mako Youth Bat 2014 (-11),249.97, Nike Youth USA Away Stadium Replica Soccer Je,75.0, adidas Brazuca 2014 Top Glider Soccer Ball,29.99, Brooks Women's Adrenaline GTS 13 Running Shoe,89.99, Nike Men's USA Away Stadium Replica Soccer Je,90.0, Lifetime Freestyle XL Stand-Up Paddle Board,399.99, adidas Men's Germany Home Soccer Jersey,90.0, Nike+ Fuelband SE,99.0, PUMA Men's evoPOWER 1 Tricks FG Soccer Cleat,189.99, Goaliath 54" In-Ground Basketball Hoop with P,499.99, adidas Brazuca 2014 Top Repliqué Soccer Ball,39.99, Top Flite Women's XL 12-Piece Complete Set - ,179.98, Fitbit Flex Wireless Activity & Sleep Wristba,99.95, Nike Women's Tempo Shorts,30.0, Under Armour Men's Renegade D Mid Football Cl,89.99, Nike Men's Free 5.0+ Running Shoe,99.99, Nike Women's Pro Core 3" Compression Shorts,28.0))
+(Water Sports,CompactBuffer(Lifetime Freestyle XL Stand-Up Paddle Board,399.99, Pelican Maverick 100X Kayak,349.99, DBX Vector Series Men's Nylon Life Vest,19.98, Old Town Canoe Saranac 146 Canoe,499.99, Pelican Vortex 80DLX Kayak,199.99, Pelican Trailblazer 100 Angler Fishing Kayak,299.99, Pelican Trailblazer 100 Kayak,229.99, Perception Sport Swifty Deluxe 9.5 Kayak,349.99, O'Brien Men's Neoprene Life Vest,49.98, Field & Stream 12' Eagle Run Kayak,549.99, DBX Vector Series Women's Nylon Life Vest,19.98, Tiga 11'4" Stand-Up Paddle Board,799.99, Coleman Scanoe Canoe,399.99, Pelican Apex 100 Kayak,229.99, O'Brien Youth Neoprene Life Vest,44.98, Pelican Sunstream 100 Kayak,199.99, Field & Stream Eagle Talon Kayak,549.99, Old Town Trip 10 Angler Deluxe Kayak,499.99, Future Beach Spirit 120 Kayak,269.99, O'Brien Women's Neoprene Life Vest,49.98, Quest Pioneer Adjustable Aluminum Kayak Paddl,29.99, Future Beach Trophy 126 Kayak,369.99, DBX Vector Series Youth Nylon Life Vest,34.99, Snap OnTop Solo Kayak,399.99))
+(Tennis & Racquet,CompactBuffer(Quest Q64 10 FT. x 10 FT. Slant Leg Instant U,59.98, Nike Women's Pro Core 3" Compression Shorts,28.0, Nike Women's Pro Victory Compression Bra,21.99, Quik Shade Summit SX170 10 FT. x 10 FT. Canop,199.99, Kijaro Dual Lock Chair,29.99, Quest 12' x 12' Dome Canopy,149.99, Nike Women's Pro Hyperwarm Fitted Tights,24.97, Nike Elite Crew Basketball Sock,14.0, Quest Q100 10' X 10' Dome Canopy,99.98, Teeter Hang Ups NXT-S Inversion Table,299.99, SKLZ Sport-Brella XL,69.99, E-Z Up Vista 12' x 12' Recreational Instant S,134.99, Under Armour Men's Ignite Camo II Slide,34.99, McDavid HEX Extended Leg Sleeves,29.99, Kijaro XXL Dual Lock Oversized Chair,39.99, Nike Women's Pro Hyperwarm Half Zip Long Slee,31.97, Nike Men's Alpha Pro D Mid Football Cleat,99.99, Nike Men's Fly Shorts 2.0,34.0, Under Armour Men's Highlight RM Football Clea,59.99, Nike Men's Comfort 2 Slide,44.99, YETI Tundra 65 Chest Cooler,399.99, Quest 12' x 12' Screen House,69.99, Quest Oversized Arm Chair,21.99, Nike Hyper Elite Crew Basketball Sock,18.0))
+
+scala> 
+
+scala> //sparse sorting
+
+scala> def topNProducts(rec : (String,Iterable[(String)]),topN : Int) : Iterable[(String,String)] ={
+     | rec._2.toList.sortBy(k => -k.split(",")(1).toFloat).take(topN).map(r => (rec._1, r))
+     | }
+topNProducts: (rec: (String, Iterable[String]), topN: Int)Iterable[(String, String)]
+
+scala> 
+
+scala> cate_groupBy.flatMap(rec => topNProducts(rec,2)).take(10).foreach(println)
+(Cleats,Total Gym 1900,399.99)
+(Cleats,Total Gym 1400,299.99)
+(Accessories,SOLE F85 Treadmill,1799.99)
+(Accessories,SOLE E25 Elliptical,999.99)
+(Cardio Equipment,Goaliath 54" In-Ground Basketball Hoop with P,499.99)
+(Cardio Equipment,Lifetime Freestyle XL Stand-Up Paddle Board,399.99)
+(Water Sports,Tiga 11'4" Stand-Up Paddle Board,799.99)
+(Water Sports,Field & Stream 12' Eagle Run Kayak,549.99)
+(Tennis & Racquet,YETI Tundra 65 Chest Cooler,399.99)
+(Tennis & Racquet,Teeter Hang Ups NXT-S Inversion Table,299.99)
+
+scala> 
+
+scala> //dense sorting
+
+scala> def topNPricedProducts(rec :(String, Iterable[String]), topN : Int) : Iterable[(String,String)] = {
+     | val list = rec._2.toList
+     | val topNPrices = list.map(rec => rec.split(",")(1).toFloat).sortBy(k => -k).distinct.take(topN)
+     | val sortedList = list.sortBy(k => -k.split(",")(1).toFloat)
+     | sortedList.filter(r => topNPrices.contains(r.split(",")(1).toFloat)).map(r => (rec._1,r))
+     | }
+topNPricedProducts: (rec: (String, Iterable[String]), topN: Int)Iterable[(String, String)]
+
+scala> 
+
+scala> cate_groupBy.flatMap(rec => topNProducts(rec,2)).take(10).foreach(println)
+(Cleats,Total Gym 1900,399.99)
+(Cleats,Total Gym 1400,299.99)
+(Accessories,SOLE F85 Treadmill,1799.99)
+(Accessories,SOLE E25 Elliptical,999.99)
+(Cardio Equipment,Goaliath 54" In-Ground Basketball Hoop with P,499.99)
+(Cardio Equipment,Lifetime Freestyle XL Stand-Up Paddle Board,399.99)
+(Water Sports,Tiga 11'4" Stand-Up Paddle Board,799.99)
+(Water Sports,Field & Stream 12' Eagle Run Kayak,549.99)
+(Tennis & Racquet,YETI Tundra 65 Chest Cooler,399.99)
+(Tennis & Racquet,Teeter Hang Ups NXT-S Inversion Table,299.99)
+
+scala> cate_groupBy.flatMap(rec => topNProducts(rec,2)).saveAsTextFile("TopNProductsByCategory/result")
